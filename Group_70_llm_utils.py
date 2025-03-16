@@ -7,8 +7,10 @@ torch.classes.__path__ = [
     os.path.join(torch.__path__[0], torch.classes.__file__)]
 
 
-from transformers import AutoTokenizer, AutoModel, pipeline
+from transformers import AutoTokenizer, AutoModel, pipeline, AutoModelForSequenceClassification
 import datetime
+from torch.nn.functional import softmax
+from huggingface_hub import login
 
 
 # Define constants
@@ -35,6 +37,16 @@ Context:
 </s>
 
 <|assistant|>"""
+
+
+# Token is required for Guardrails Model
+token_available = False
+
+
+token = os.environ.get("HUGGING_FACE_TOKEN")
+if token:
+    token_available = True
+    login(token=token)
 
 
 def log(text):
@@ -179,6 +191,65 @@ class ResponseGenerator:
         }
 
 
+
+class Guardrails:
+    def __init__(self,
+                 prompt_injection_model_name='meta-llama/Prompt-Guard-86M'):
+        self.model_name = prompt_injection_model_name
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self.model = AutoModelForSequenceClassification.from_pretrained(
+            self.model_name)
+
+    def get_class_probabilities(self, text, temperature=1.0, device='cpu'):
+        """
+        Evaluate the model on the given text with temperature-adjusted softmax.
+
+        Args:
+            text (str): The input text to classify.
+            temperature (float): The temperature for the softmax function. Default is 1.0.
+            device (str): The device to evaluate the model on.
+
+        Returns:
+            torch.Tensor: The probability of each class adjusted by the temperature.
+        """
+        # Encode the text
+        inputs = self.tokenizer(
+            text, return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=512)
+        inputs = inputs.to(device)
+        # Get logits from the model
+        with torch.no_grad():
+            logits = self.model(**inputs).logits
+        # Apply temperature scaling
+        scaled_logits = logits / temperature
+        # Apply softmax to get probabilities
+        probabilities = softmax(scaled_logits, dim=-1)
+        return probabilities
+
+    def get_indirect_injection_score(self, text, temperature=1.0, device='cpu'):
+        """
+        Evaluate the probability that a given string contains any embedded instructions (malicious or benign).
+        Appropriate for filtering third party inputs (e.g. web searches, tool outputs) into an LLM.
+
+        Args:
+            text (str): The input text to evaluate.
+            temperature (float): The temperature for the softmax function. Default is 1.0.
+            device (str): The device to evaluate the model on.
+
+        Returns:
+            float: The combined probability of the text containing malicious or embedded instructions.
+        """
+        probabilities = self.get_class_probabilities(text, temperature, device)
+        return (probabilities[0, 1] + probabilities[0, 2]).item()
+
+    def is_safe(self, text):
+        score = self.get_indirect_injection_score(text)
+        return score < 0.5
+
+
 class Utils:
     response_generator = ResponseGenerator()
     embedding_model = EmbeddingModel()
+    guardrails = Guardrails() if token_available else None

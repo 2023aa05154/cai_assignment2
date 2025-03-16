@@ -127,6 +127,7 @@ class DocumentProcessor:
 if not st.session_state.get("rag_initialized"):
     st.session_state.resp_gen = Utils.response_generator
     st.session_state.emb_mdl = Utils.embedding_model
+    st.session_state.guardrails = Utils.guardrails
     st.session_state.rag_initialized = True
 
 
@@ -151,6 +152,14 @@ class BasicRAG:
 
     def answer(self, query, texts, embeddings, top_k):
         log(f"Generating answer using top k: {top_k}")
+
+        # Input Guardrails
+        guardrails = st.session_state.guardrails
+        if guardrails:
+            log('Applying input guardrails for user query')
+        if guardrails and (not st.session_state.guardrails.is_safe(query)):
+            return "Unsafe query identified", 1.0, [], []
+
         relevant_chunks, scores = self.retrieve(
             query, texts, embeddings, top_k)
 
@@ -259,6 +268,14 @@ class AdvancedRAG:
 
     def answer(self, query, texts, embeddings, top_k):
         log(f"Generating answer using top k: {top_k}")
+
+        # Input Guardrails
+        guardrails = st.session_state.guardrails
+        if guardrails:
+            log('Applying input guardrails for user query')
+        if guardrails and (not st.session_state.guardrails.is_safe(query)):
+            return "Unsafe query identified", 1.0, [], []
+
         relevant_chunks, scores = self.retrieve(
             query, texts, embeddings, top_k)
 
