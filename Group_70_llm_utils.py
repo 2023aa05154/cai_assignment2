@@ -17,23 +17,27 @@ DEVICE = 'cuda' if cuda.is_available() else 'cpu'
 # Small, efficient model
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 # Small LLM for generation
-LLM_MODEL_NAME = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+LLM_MODEL_NAME = "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
 
 quantization_config = BitsAndBytesConfig(load_in_8bit=True)
 
 # RAG Prompt
-rag_prompt = """
-Based on the following financial document excerpts, please answer the question.
+rag_prompt = """<|system|>
+You are a helpful assistant that answers questions about financial documents. 
+Only provide information that is directly supported by the given context.
+If you don't know the answer based on the context, say so clearly.
+</s>
+
+<|user|>
+Based on the following financial document excerpts, please answer the question:
 
 Question: {query}
 
 Context:
 {context}
+</s>
 
-
-If above context is not relevant to answer the query, simply reply "This information is not available in the context"
-
-Answer:"""
+<|assistant|>"""
 
 
 def log(text):
@@ -70,35 +74,112 @@ class EmbeddingModel:
         return embeddings.cpu().numpy()
 
 
-# Response generator used by both the RAG approaches
 class ResponseGenerator:
-    def __init__(self, model_name=LLM_MODEL_NAME):
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            quantization_config=quantization_config,
-            device_map="auto")
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.generator = pipeline(
-            "text-generation",
-            model=self.model,
-            tokenizer=self.tokenizer,
-            # device=0 if DEVICE == 'cuda' else -1,
-            max_new_tokens=1024,
-            return_full_text=False
-        )
+    def __init__(self, model_path="tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"):
+        """
+        Initialize a response generator using a GGUF quantized model for CPU efficiency.
+
+        Args:
+            model_path: Path to the GGUF model file. Default is TinyLlama 1.1B in 4-bit quantization.
+        """
+        try:
+            from llama_cpp import Llama
+
+            # Check if model exists, if not, download it
+            if not os.path.exists(model_path):
+                self._download_model(model_path)
+
+            # Initialize the model with CPU-friendly settings
+            self.llm = Llama(
+                model_path=model_path,
+                n_ctx=2048,           # Context window size
+                n_threads=4,          # Number of CPU threads to use
+                n_batch=512,          # Batch size for prompt processing
+                verbose=False         # Set to True for debugging
+            )
+            self.loaded = True
+
+        except ImportError:
+            log("llama-cpp-python package not installed")
+            self.loaded = False
+
+    def _download_model(self, model_path):
+        """Download the GGUF model file if not present."""
+        import requests
+        import os
+
+        # Map of model filenames to their Hugging Face repo URLs
+        model_urls = {
+            "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf": 
+                "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf",
+            "tinyllama-1.1b-chat-v1.0.Q8_0.gguf": 
+                "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q8_0.gguf"
+        }
+
+        # Get the URL for the specified model
+        if model_path in model_urls:
+            url = model_urls[model_path]
+        else:
+            log(f"No download URL found for {model_path}")
+            return
+
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(model_path) if os.path.dirname(model_path) else '.', exist_ok=True)
+
+        # Download with progress bar
+        response = requests.get(url, stream=True)
+        block_size = 1024  # 1 Kibibyte
+
+        with open(model_path, 'wb') as f:
+            downloaded = 0
+            for data in response.iter_content(block_size):
+                f.write(data)
+                downloaded += len(data)
+
+        log(f"Downloaded {model_path} successfully")
 
     def generate_response(self, query, context):
-        prompt = rag_prompt.format(query=query, context=context)
-        response = self.generator(
-            prompt, do_sample=True, temperature=0.3
-            )[0]['generated_text'].strip().replace('$', '\\$')
-        # # Extract the answer part
-        # if "Answer:" in response:
-        #     answer = response.split("Answer:")[-1].strip()
-        # else:
-        #     answer = response.split(prompt)[-1].strip()
+        """
+        Generate a response based on the query and context using the quantized LLM.
 
-        return response
+        Args:
+            query: The user's question
+            context: The retrieved document chunks as context
+
+        Returns:
+            A generated answer string
+        """
+        if not self.loaded:
+            return "Model could not be loaded. Please check your installation."
+
+        # Format prompt using the chat template compatible with TinyLlama chat models
+        prompt = rag_prompt.format(context=context, query=query)
+
+        # Generate response
+        response = self.llm(
+            prompt,
+            max_tokens=512,          # Maximum new tokens to generate
+            temperature=0.3,         # Lower is more deterministic
+            top_p=0.9,               # Nucleus sampling
+            repeat_penalty=1.1,      # Penalty for repeating tokens
+            echo=False               # Don't echo the prompt in the output
+        )
+
+        # Extract answer text
+        answer = response['choices'][0]['text'].strip()
+
+        return answer
+
+    def get_model_info(self):
+        """Return information about the loaded model."""
+        if not self.loaded:
+            return "Model not loaded"
+
+        return {
+            "type": "GGUF quantized LLM",
+            "n_ctx": self.llm.n_ctx,
+            "n_threads": self.llm.n_threads
+        }
 
 
 class Utils:
