@@ -8,6 +8,7 @@ torch.classes.__path__ = [
 
 
 from transformers import AutoTokenizer, AutoModel, pipeline
+from transformers import AutoModelForCausalLM, BitsAndBytesConfig
 import datetime
 
 
@@ -17,6 +18,8 @@ DEVICE = 'cuda' if cuda.is_available() else 'cpu'
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 # Small LLM for generation
 LLM_MODEL_NAME = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+
+quantization_config = BitsAndBytesConfig(load_in_8bit=True)
 
 # RAG Prompt
 rag_prompt = """
@@ -70,12 +73,16 @@ class EmbeddingModel:
 # Response generator used by both the RAG approaches
 class ResponseGenerator:
     def __init__(self, model_name=LLM_MODEL_NAME):
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            quantization_config=quantization_config,
+            device_map="auto")
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.generator = pipeline(
             "text-generation",
-            model=model_name,
+            model=self.model,
             tokenizer=self.tokenizer,
-            device=0 if DEVICE == 'cuda' else -1,
+            # device=0 if DEVICE == 'cuda' else -1,
             max_new_tokens=1024,
             return_full_text=False
         )
