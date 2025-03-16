@@ -8,7 +8,6 @@ torch.classes.__path__ = [
 
 
 from transformers import AutoTokenizer, AutoModel, pipeline
-from transformers import AutoModelForCausalLM, BitsAndBytesConfig
 import datetime
 
 
@@ -18,8 +17,6 @@ DEVICE = 'cuda' if cuda.is_available() else 'cpu'
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 # Small LLM for generation
 LLM_MODEL_NAME = "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
-
-quantization_config = BitsAndBytesConfig(load_in_8bit=True)
 
 # RAG Prompt
 rag_prompt = """<|system|>
