@@ -66,3 +66,10 @@
 ### Snippets of Basic and Advanced RAG implementations:
 - Basic RAG implementation is available under BasicRAG class in the code.
 - Advanced RAG implementaion is available under AdvancedRAG class in the code.
+
+### Link to deployed App
+
+[Huggingface spaces deployment](https://huggingface.co/spaces/as32608/rag-app)
+
+
+
