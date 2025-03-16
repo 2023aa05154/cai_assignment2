@@ -28,7 +28,6 @@ torch.classes.__path__ = [
     os.path.join(torch.__path__[0], torch.classes.__file__)]
 
 
-from transformers import AutoTokenizer, AutoModel, pipeline
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
 from sklearn.metrics.pairwise import cosine_similarity
@@ -37,22 +36,11 @@ from rank_bm25 import BM25Okapi
 
 os.environ['NLTK_DATA'] = "./nltk_data"
 
-import nltk
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
 import re
 import datetime
-
-
-# Download NLTK resources
-try:
-    nltk.data.find('tokenizers/punkt')
-except LookupError:
-    nltk.download('punkt')
-try:
-    nltk.data.find('corpora/stopwords')
-except LookupError:
-    nltk.download('stopwords')
+from Group_70_llm_utils import Utils
 
 
 # Configurations
@@ -98,57 +86,6 @@ class RagTypes:
     advanced: str = "Advanced RAG"
 
 
-# Embedding Model used by both the RAG approaches
-class EmbeddingModel:
-    def __init__(self, model_name=EMBEDDING_MODEL_NAME):
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModel.from_pretrained(model_name).to(DEVICE)
-
-    def get_embeddings(self, texts):
-        encoded_input = self.tokenizer(
-            texts, padding=True, truncation=True,
-            return_tensors='pt').to(DEVICE)
-        with torch.no_grad():
-            model_output = self.model(**encoded_input)
-            # Mean Pooling - Take attention mask into account for averaging
-            attention_mask = encoded_input['attention_mask']
-            input_mask_expanded = attention_mask.unsqueeze(-1).expand(
-                model_output.last_hidden_state.size()).float()
-            sum_embeddings = torch.sum(
-                model_output.last_hidden_state * input_mask_expanded, 1)
-            sum_mask = torch.clamp(input_mask_expanded.sum(1), min=1e-9)
-            embeddings = sum_embeddings / sum_mask
-
-        return embeddings.cpu().numpy()
-
-
-# Response generator used by both the RAG approaches
-class ResponseGenerator:
-    def __init__(self, model_name=LLM_MODEL_NAME):
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.generator = pipeline(
-            "text-generation",
-            model=model_name,
-            tokenizer=self.tokenizer,
-            device=0 if DEVICE == 'cuda' else -1,
-            max_new_tokens=1024,
-            return_full_text=False
-        )
-
-    def generate_response(self, query, context):
-        prompt = rag_prompt.format(query=query, context=context)
-        response = self.generator(
-            prompt, do_sample=True, temperature=0.3
-            )[0]['generated_text'].strip().replace('$', '\\$')
-        # # Extract the answer part
-        # if "Answer:" in response:
-        #     answer = response.split("Answer:")[-1].strip()
-        # else:
-        #     answer = response.split(prompt)[-1].strip()
-
-        return response
-
-
 # Document Processor (Splits and Embeds the documents)
 class DocumentProcessor:
     def __init__(self, chunk_size=1000, chunk_overlap=200):
@@ -157,7 +94,7 @@ class DocumentProcessor:
             chunk_overlap=chunk_overlap,
             length_function=len
         )
-        self.embedding_model = EmbeddingModel()
+        self.embedding_model = Utils.embedding_model
 
     def process_pdf(self, pdf_file):
         # Save the uploaded file temporarily
@@ -188,8 +125,8 @@ class DocumentProcessor:
 # Instantiate global Response Generator and Embedding Model so that
 # these memory heavy objects don't re-initialize on each strealit re-run
 if not st.session_state.get("rag_initialized"):
-    st.session_state.resp_gen = ResponseGenerator()
-    st.session_state.emb_mdl = EmbeddingModel()
+    st.session_state.resp_gen = Utils.response_generator
+    st.session_state.emb_mdl = Utils.embedding_model
     st.session_state.rag_initialized = True
 
 
