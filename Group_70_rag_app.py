@@ -22,21 +22,26 @@ import os
 import tempfile
 import torch
 from torch import cuda
+
+# Fix for torch issue with streamlit package (ref: https://github.com/VikParuchuri/marker/issues/442)
+torch.classes.__path__ = [
+    os.path.join(torch.__path__[0], torch.classes.__file__)]
+
+
 from transformers import AutoTokenizer, AutoModel, pipeline
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
 from sklearn.metrics.pairwise import cosine_similarity
 from rank_bm25 import BM25Okapi
+
+
+os.environ['NLTK_DATA'] = "./nltk_data"
+
 import nltk
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
 import re
 import datetime
-
-
-# Fix for torch issue with streamlit package (ref: https://github.com/VikParuchuri/marker/issues/442)
-torch.classes.__path__ = [
-    os.path.join(torch.__path__[0], torch.classes.__file__)]
 
 
 # Download NLTK resources
